@@ -1,0 +1,70 @@
+extends Area3D
+
+@export var snap_distance: float = 0.5  # Радиус магнита для подключения к гнезду
+var is_dragging: bool = false
+var original_position: Vector3
+
+@onready var camera: Camera3D = get_viewport().get_camera_3d()
+var plane: Plane
+
+func _ready() -> void:
+	original_position = global_position
+	# Создаем виртуальную плоскость на глубине начальной позиции штекера перпендикулярно камере
+	# Или просто горизонтальную плоскость стола (например, Plane(Vector3.UP, global_position.y))
+	plane = Plane(Vector3.UP, global_position.y)
+
+func _input_event(_viewport: Node, event: InputEvent, _position: Vector3, _normal: Vector3, _shape_idx: int) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			is_dragging = true
+		else:
+			if is_dragging:
+				is_dragging = false
+				try_snap_to_socket()
+
+func _process(delta: float) -> void:
+	if is_dragging:
+		var mouse_pos = get_viewport().get_mouse_position()
+		var ray_origin = camera.project_ray_origin(mouse_pos)
+		var ray_dir = camera.project_ray_normal(mouse_pos)
+		
+		# Пересекаем луч с плоскостью пульта, чтобы штекер не улетал
+		var target_pos = plane.intersects_ray(ray_origin, ray_dir)
+		
+		if target_pos != null:
+			# Немного приподнимаем штекер по оси Y, чтобы он был "над" столом при перетаскивании
+			target_pos.y = original_position.y + 0.1 
+			global_position = global_position.lerp(target_pos, delta * 30.0)
+
+# Проверяем ближайшее гнездо в радиусе snap_distance
+func try_snap_to_socket() -> void:
+	var closest_socket: Node3D = null
+	var min_distance: float = snap_distance
+	
+	# Ищем все ноды в группе "sockets" на сцене
+	var sockets = get_tree().get_nodes_in_group("sockets")
+	
+	for socket in sockets:
+		var dist = global_position.distance_to(socket.global_position)
+		if dist < min_distance:
+			min_distance = dist
+			closest_socket = socket
+			
+	if closest_socket != null:
+		# Примагничиваем к позиции гнезда
+		global_position = closest_socket.global_position
+		trigger_menu_action(closest_socket.name)
+	else:
+		# Если рядом нет гнезд — возвращаем на базу
+		global_position = original_position
+
+func trigger_menu_action(socket_name: String) -> void:
+	print("Подключено к: ", socket_name)
+	match socket_name:
+		"Socket_Play":
+			get_tree().change_scene_to_file("res://scenes/MainGame.tscn")
+		"Socket_Settings":
+			print("Открываем настройки...")
+			global_position = original_position
+		"Socket_Exit":
+			get_tree().quit()
