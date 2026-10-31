@@ -1,0 +1,105 @@
+extends Area3D
+
+@export var snap_distance: float = 0.5  # Радиус магнита к гнезду
+@onready var wire: MeshInstance3D = $Wire # Ссылка на дочерний меш провода
+
+var is_dragging: bool = false
+var original_position: Vector3
+
+@onready var camera: Camera3D = get_viewport().get_camera_3d()
+var plane: Plane
+
+func _ready() -> void:
+	original_position = global_position
+	# Вертикальная плоскость для движения по стене (оси X и Y)
+	plane = Plane(Vector3.BACK, global_position.z)
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			if is_mouse_over_self():
+				is_dragging = true
+		else:
+			if is_dragging:
+				is_dragging = false
+				try_snap_to_socket()
+
+func is_mouse_over_self() -> bool:
+	var mouse_pos = get_viewport().get_mouse_position()
+	var ray_origin = camera.project_ray_origin(mouse_pos)
+	var ray_end = ray_origin + camera.project_ray_normal(mouse_pos) * 1000.0
+	
+	var space_state = get_world_3d().direct_space_state
+	var query = PhysicsRayQueryParameters3D.create(ray_origin, ray_end)
+	query.collide_with_areas = true
+	
+	var result = space_state.intersect_ray(query)
+	if result and result.collider == self:
+		return true
+	return false
+
+func _process(delta: float) -> void:
+	if is_dragging:
+		var mouse_pos = get_viewport().get_mouse_position()
+		var ray_origin = camera.project_ray_origin(mouse_pos)
+		var ray_dir = camera.project_ray_normal(mouse_pos)
+		
+		var target_pos = plane.intersects_ray(ray_origin, ray_dir)
+		
+		if target_pos != null:
+			# Фиксируем глубину (Z), чтобы вилка ходила строго по стене
+			target_pos.z = original_position.z 
+			global_position = global_position.lerp(target_pos, delta * 30.0)
+	
+	# Каждый кадр обновляем положение и размер провода
+	update_wire()
+
+# Функция динамического натяжения провода
+func update_wire() -> void:
+	if not wire:
+		return
+		
+	var p1 = original_position  наушниковая база / откуда растет провод
+	var p2 = global_position    # текущая позиция вилки
+	
+	var dir = p2 - p1
+	var length = dir.length()
+	
+	# Ставим провод ровно посередине между базой и вилкой
+	wire.global_position = (p1 + p2) / 2.0
+	
+	# Изменяем масштаб по оси Y (так как высота дефолтного цилиндра в Godot = 2.0)
+	wire.scale.y = length / 2.0
+	
+	# Поворачиваем провод лицом к текущей позиции вилки
+	if length > 0.001:
+		wire.look_at(p2, Vector3.UP)
+		wire.rotate_object_local(Vector3.RIGHT, PI / 2)
+
+func try_snap_to_socket() -> void:
+	var closest_socket: Node3D = null
+	var min_distance: float = snap_distance
+	
+	var sockets = get_tree().get_nodes_in_group("sockets")
+	for socket in sockets:
+		var dist = global_position.distance_to(socket.global_position)
+		if dist < min_distance:
+			min_distance = dist
+			closest_socket = socket
+			
+	if closest_socket != null:
+		global_position = closest_socket.global_position
+		trigger_menu_action(closest_socket.name)
+	else:
+		global_position = original_position
+
+func trigger_menu_action(socket_name: String) -> void:
+	print("Подключено к: ", socket_name)
+	match socket_name:
+		"Socket_Play":
+			get_tree().change_scene_to_file("res://scenes/MainGame.tscn")
+		"Socket_Settings":
+			print("Открываем настройки...")
+			global_position = original_position
+		"Socket_Exit":
+			get_tree().quit()
