@@ -1,0 +1,80 @@
+extends Area3D
+
+@export var snap_distance: float = 0.5  # Радиус магнита к гнезду
+var is_dragging: bool = false
+var original_position: Vector3
+
+@onready var camera: Camera3D = get_viewport().get_camera_3d()
+var plane: Plane
+
+func _ready() -> void:
+	original_position = global_position
+	# Создаем ВЕРТИКАЛЬНУЮ плоскость на глубине начальной позиции штекера (лицом к камере)
+	# Vector3.BACK означает, что плоскость смотрит на камеру (по оси Z)
+	plane = Plane(Vector3.BACK, global_position.z)
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			if is_mouse_over_self():
+				is_dragging = true
+		else:
+			if is_dragging:
+				is_dragging = false
+				try_snap_to_socket()
+
+func is_mouse_over_self() -> bool:
+	var mouse_pos = get_viewport().get_mouse_position()
+	var ray_origin = camera.project_ray_origin(mouse_pos)
+	var ray_end = ray_origin + camera.project_ray_normal(mouse_pos) * 1000.0
+	
+	var space_state = get_world_3d().direct_space_state
+	var query = PhysicsRayQueryParameters3D.create(ray_origin, ray_end)
+	query.collide_with_areas = true
+	
+	var result = space_state.intersect_ray(query)
+	if result and result.collider == self:
+		return true
+	return false
+
+func _process(delta: float) -> void:
+	if is_dragging:
+		var mouse_pos = get_viewport().get_mouse_position()
+		var ray_origin = camera.project_ray_origin(mouse_pos)
+		var ray_dir = camera.project_ray_normal(mouse_pos)
+		
+		var target_pos = plane.intersects_ray(ray_origin, ray_dir)
+		
+		if target_pos != null:
+			# Фиксируем глубину (Z), чтобы штекер не улетал вглубь стены или к камере, 
+			# а двигался строго по осям X и Y на переднем плане стены
+			target_pos.z = original_position.z
+			global_position = global_position.lerp(target_pos, delta * 30.0)
+
+func try_snap_to_socket() -> void:
+	var closest_socket: Node3D = null
+	var min_distance: float = snap_distance
+	
+	var sockets = get_tree().get_nodes_in_group("sockets")
+	for socket in sockets:
+		var dist = global_position.distance_to(socket.global_position)
+		if dist < min_distance:
+			min_distance = dist
+			closest_socket = socket
+			
+	if closest_socket != null:
+		global_position = closest_socket.global_position
+		trigger_menu_action(closest_socket.name)
+	else:
+		global_position = original_position
+
+func trigger_menu_action(socket_name: String) -> void:
+	print("Подключено к: ", socket_name)
+	match socket_name:
+		"Socket_Play":
+			get_tree().change_scene_to_file("res://scenes/MainGame.tscn")
+		"Socket_Settings":
+			print("Открываем настройки...")
+			global_position = original_position
+		"Socket_Exit":
+			get_tree().quit()
