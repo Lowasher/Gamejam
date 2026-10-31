@@ -1,0 +1,66 @@
+extends Area3D
+
+@export var ray_length: float = 100.0
+var is_dragging: bool = false
+var original_position: Vector3
+
+# Ссылка на камеру
+@onready var camera: Camera3D = get_viewport().get_camera_3d()
+
+func _ready() -> void:
+	original_position = global_position
+
+# Ловим клик мыши по штекеру
+func _input_event(_viewport: Node, event: InputEvent, _position: Vector3, _normal: Vector3, _shape_idx: int) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			is_dragging = true
+		else:
+			if is_dragging:
+				is_dragging = false
+				check_drop_target()
+
+func _process(delta: float) -> void:
+	if is_dragging:
+		# Перемещаем штекер за курсором мыши на фиксированной глубине от камеры
+		var mouse_pos = get_viewport().get_mouse_position()
+		var ray_origin = camera.project_ray_origin(mouse_pos)
+		var ray_dir = camera.project_ray_normal(mouse_pos)
+		
+		# Пересечение луча с плоскостью, на которой лежит пульт (например, на высоте Z или Y)
+		# Для простоты: двигаем по плоскости Y = const (на высоте стола)
+		var plane = Plane(Vector3.UP, global_position.y)
+		var target_pos = plane.intersects_ray(ray_origin, ray_dir)
+		
+		if target_pos != null:
+			# Плавное следование за мышью
+			global_position = global_position.lerp(target_pos, delta * 25.0)
+
+# Проверяем, в какое гнездо попал штекер при отпускании
+func check_drop_target() -> void:
+	var overlapping_areas = get_overlapping_areas()
+	var connected = false
+	
+	for area in overlapping_areas:
+		if area.is_in_group("sockets"):
+			connected = true
+			trigger_menu_action(area.name)
+			break
+			
+	if not connected:
+		# Если бросили мимо гнезда — возвращаем на место
+		global_position = original_position
+
+func trigger_menu_action(socket_name: String) -> void:
+	print("Подключено к: ", socket_name)
+	match socket_name:
+		"Socket_Play":
+			# Загружаем основную игровую сцену
+			get_tree().change_scene_to_file("res://scenes/MainGame.tscn")
+		"Socket_Settings":
+			# Открываем настройки (можно показать UI или подвинуть камеру)
+			print("Открываем настройки...")
+			global_position = original_position
+		"Socket_Exit":
+			# Выход из игры
+			get_tree().quit()
